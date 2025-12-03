@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full bg-gray-900">
+<head>
+    <meta charset="UTF-8">
+    <title>Receiver - Xem & Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="flex flex-col h-full text-white bg-black overflow-hidden">
+
+<header class="bg-gray-800 p-3 flex justify-between items-center z-10 shadow-md shrink-0">
+    <div class="flex flex-col">
+        <div class="flex items-center gap-2">
+            <h1 class="font-bold text-lg text-green-400">RECEIVER</h1>
+            <span class="text-gray-400 text-sm">| Bạn: <b id="myName">...</b></span>
+        </div>
+        <div class="text-sm text-gray-300">
+            Đang xem: <b id="senderName" class="text-yellow-400">Đang chờ...</b>
+        </div>
+    </div>
+    <button onclick="exitRoom()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded font-bold transition">
+        🚪 Thoát
+    </button>
+</header>
+
+<div class="flex flex-1 overflow-hidden">
+
+    <div class="flex-1 relative flex items-center justify-center bg-black">
+        <video id="remoteScreen" autoplay playsinline controls class="max-w-full max-h-full object-contain"></video>
+
+        <video id="remoteCamera" autoplay playsinline class="absolute bottom-4 left-4 w-48 h-36 bg-black border border-gray-600 rounded-lg object-cover hidden z-20 shadow-lg"></video>
+
+        <div id="status" class="absolute text-gray-500 text-lg pointer-events-none">Đang kết nối Server...</div>
+    </div>
+
+    <div class="w-80 bg-gray-800 border-l border-gray-700 flex flex-col shrink-0">
+        <div class="p-3 bg-gray-750 font-bold text-gray-300 border-b border-gray-700 text-center">Trò chuyện</div>
+
+        <div id="chatBox" class="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-800 scrollbar-hide flex flex-col-reverse">
+        </div>
+
+        <div class="p-2 bg-gray-700 border-t border-gray-600">
+            <form onsubmit="sendChat(event)" class="flex gap-2">
+                <div class="p-2 bg-gray-700 border-t border-gray-600 relative">
+                    <div id="emojiPicker" class="hidden absolute bottom-14 left-2 bg-gray-800 border border-gray-600 p-2 rounded-lg shadow-xl grid grid-cols-6 gap-2 z-50 w-64 h-48 overflow-y-auto">
+                    </div>
+
+                    <form onsubmit="sendChat(event)" class="flex flex-nowrap items-center gap-2 w-full">
+                        <button type="button" onclick="toggleEmoji()" class="shrink-0 text-2xl hover:bg-gray-600 rounded px-1 transition pb-1">
+                            😀
+                        </button>
+
+                        <input id="chatInput" type="text" placeholder="Chat..." autocomplete="off"
+                               class="flex-1 min-w-0 bg-gray-600 text-white px-3 py-2 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm">
+
+                        <button type="submit" class="shrink-0 bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded text-white font-bold text-sm">
+                            ➤
+                        </button>
+                    </form>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- CONFIG ---
+    const WS_URL = "ws://192.168.101.27:3001"; // Sửa IP
+
+    const query = new URLSearchParams(window.location.search);
+    const room = query.get("room") || "demo1";
+    const myUsername = query.get("user") || "Khách";
+    const viewerId = "viewer_" + Math.random().toString(36).substr(2, 9);
+
+    document.getElementById('myName').textContent = myUsername;
+    const statusEl = document.getElementById('status');
+    const chatBox = document.getElementById('chatBox');
+
+    const remoteScreen = document.getElementById('remoteScreen');
+    const remoteCamera = document.getElementById('remoteCamera');
+
+    const ws = new WebSocket(WS_URL);
+    let pc = null;
+    let videoTrackCount = 0; // Đếm số lượng track video nhận được để phân chia
+
+    ws.onopen = () => {
+        statusEl.textContent = "Đang chờ Sender...";
+        ws.send(JSON.stringify({ type: "join", room, id: viewerId, username: myUsername }));
+    };
+
+    ws.onmessage = async (msg) => {
+        const data = JSON.parse(msg.data);
+        if (data.target && data.target !== viewerId) return;
+
+        // 1. Chat
+        if (data.type === "chat") {
+            addChatMessage(data.username, data.content, data.time, false); // Thêm tham số data.time
+            return;
+        }
+
+        // 2. Sender Info
+        if (data.type === "join" && data.id === "sender") {
+            document.getElementById('senderName').textContent = data.username || "Sender";
+        }
+
+        // 3. WebRTC Offer
+        if (data.type === "offer") {
+            statusEl.textContent = "Đang nhận tín hiệu...";
+            if (pc) pc.close();
+
+            videoTrackCount = 0; // Reset đếm
+            remoteCamera.classList.add('hidden');
+
+            pc = new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+
+            // XỬ LÝ TRACK NHẬN ĐƯỢC (QUAN TRỌNG)
+            pc.ontrack = (ev) => {
+                statusEl.classList.add('hidden');
+
+                if (ev.track.kind === 'video') {
+                    videoTrackCount++;
+                    if (videoTrackCount === 1) {
+                        // Video đầu tiên -> Màn hình chính
+                        remoteScreen.srcObject = new MediaStream([ev.track]);
+                    } else {
+                        // Video thứ hai -> Camera phụ
+                        remoteCamera.srcObject = new MediaStream([ev.track]);
+                        remoteCamera.classList.remove('hidden');
+                    }
+                }
+                // Audio tự động phát theo stream của video đầu tiên nếu chúng cùng stream ID
+                // Hoặc ta có thể gán audio track vào remoteScreen luôn.
+                if (ev.track.kind === 'audio') {
+                   if (remoteScreen.srcObject) {
+                       remoteScreen.srcObject.addTrack(ev.track);
+                   }
+                }
+            };
+
+            pc.onicecandidate = (e) => {
+                if (e.candidate) ws.send(JSON.stringify({ type: 'candidate', candidate: e.candidate, room, id: viewerId }));
+            };
+
+            await pc.setRemoteDescription(data.offer);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            ws.send(JSON.stringify({ type: 'answer', answer, room, id: viewerId }));
+        }
+
+        if (data.type === 'candidate' && pc) {
+            try { await pc.addIceCandidate(data.candidate); } catch(e){}
+        }
+
+        if (data.type === "user_left" && data.id === "sender") {
+            alert("Người chia sẻ đã thoát phòng!");
+            exitRoom();
+        }
+    };
+
+    // --- XỬ LÝ EMOJI ---
+    const emojiPicker = document.getElementById('emojiPicker');
+    const chatInput = document.getElementById('chatInput');
+
+    // Danh sách các icon phổ biến (Bạn có thể thêm tùy thích)
+    const emojiList = [
+        "😀", "😂", "🤣", "😍", "🥰", "😎",
+        "😭", "😡", "😱", "🤔", "🤫", "😴",
+        "👍", "👎", "👌", "✌️", "👏", "🙌",
+        "❤️", "💔", "🔥", "✨", "🎉", "🎈",
+        "👀", "✅", "❌", "👋", "💩", "👻",
+        "🐸", "🐷", "🐱", "🐶", "🚀", "💡"
+    ];
+
+    // Hàm khởi tạo: Đổ icon vào bảng
+    function initEmoji() {
+        emojiPicker.innerHTML = ""; // Xóa cũ
+        emojiList.forEach(icon => {
+            const btn = document.createElement('button');
+            btn.textContent = icon;
+            btn.className = "text-xl p-1 hover:bg-gray-700 rounded cursor-pointer transition";
+            btn.type = "button"; // Quan trọng để không submit form
+            btn.onclick = () => {
+                chatInput.value += icon; // Thêm icon vào ô nhập
+                chatInput.focus();
+                emojiPicker.classList.add('hidden'); // Chọn xong thì ẩn bảng
+            };
+            emojiPicker.appendChild(btn);
+        });
+    }
+
+    // Hàm bật/tắt bảng
+    function toggleEmoji() {
+        const isHidden = emojiPicker.classList.contains('hidden');
+        if (isHidden) {
+            emojiPicker.classList.remove('hidden');
+            initEmoji(); // Tạo lại bảng để đảm bảo mới nhất
+        } else {
+            emojiPicker.classList.add('hidden');
+        }
+    }
+
+    // Tự động ẩn bảng emoji khi bấm ra ngoài (Tùy chọn, cho UX tốt hơn)
+    document.addEventListener('click', (e) => {
+        if (!emojiPicker.contains(e.target) && !e.target.closest('button[onclick="toggleEmoji()"]')) {
+            emojiPicker.classList.add('hidden');
+        }
+    });
+
+   // --- CHAT FUNCTION ---
+    // 1. Hàm lấy ngày giờ định dạng: "20:30 22/11"
+    function getNow() {
+        const now = new Date();
+        const time = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+        const date = now.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+        return `${time} ${date}`;
+    }
+   // 2. Hàm gửi tin nhắn (Sửa lại)
+    function sendChat(e) {
+        e.preventDefault();
+        const input = document.getElementById('chatInput');
+        const text = input.value.trim();
+
+        if(!text) return;
+
+        const currentTime = getNow(); // Lấy giờ hiện tại
+
+        // Gửi lên Server (Thêm trường 'time')
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: "chat",
+                room: room,  // Lưu ý: ở file share.html biến là 'room', view.html cũng là 'room' (lấy từ URL)
+                username: typeof username !== 'undefined' ? username : myUsername, // Xử lý biến tên khác nhau giữa 2 file
+                content: text,
+                time: currentTime
+            }));
+
+            // Hiện ngay lên giao diện của mình
+            addChatMessage("Tôi", text, currentTime, true);
+
+            input.value = "";
+            input.focus();
+        } else {
+            alert("Mất kết nối Server!");
+        }
+    }
+
+    // 3. Hàm hiển thị tin nhắn (Sửa lại giao diện)
+    function addChatMessage(sender, text, time, isMe) {
+        // Nếu time bị null (tin nhắn cũ), lấy giờ hiện tại bù vào
+        if (!time) time = getNow();
+
+        const div = document.createElement('div');
+        div.className = `flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-4`;
+
+        // HTML hiển thị: Tên người gửi + Thời gian nhỏ bên cạnh
+        div.innerHTML = `
+            <div class="flex items-baseline gap-2 mb-1">
+                <span class="text-xs font-bold ${isMe ? 'text-blue-300' : 'text-green-400'}">${sender}</span>
+                <span class="text-[10px] text-gray-500">${time}</span>
+            </div>
+            <div class="${isMe ? 'bg-blue-600' : 'bg-gray-700'} text-white px-3 py-2 rounded-lg max-w-[90%] break-words text-sm shadow-sm relative">
+                ${text}
+            </div>
+        `;
+
+        const chatBox = document.getElementById('chatBox');
+        chatBox.prepend(div);
+    }
+
+    function exitRoom() {
+        ws.close();
+        window.location.href = "index.html";
+    }
+</script>
+</body>
+</html>

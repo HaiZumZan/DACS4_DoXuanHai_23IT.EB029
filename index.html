@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full bg-gray-900">
+<head>
+    <meta charset="UTF-8">
+    <title>WebRTC Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="h-full flex flex-col items-center justify-center text-white p-6 bg-gray-900">
+
+<div class="bg-gray-800 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center relative border border-gray-700">
+    <button onclick="logout()" class="absolute top-4 right-4 text-gray-400 hover:text-red-400 transition" title="Đăng xuất">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+        </svg>
+    </button>
+
+    <h2 class="text-xl text-gray-400 mb-2">Xin chào,</h2>
+    <h1 id="display-name" class="text-3xl font-bold text-white mb-8 truncate">...</h1>
+
+    <div class="mb-6 text-left">
+        <label class="block text-sm text-gray-400 mb-2">Nhập tên phòng họp:</label>
+        <div class="relative">
+            <input type="text" id="room" value="PhongHop1" class="w-full p-3 pl-10 bg-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 absolute left-3 top-3.5 text-gray-400">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h4.06m-9.53-5.14l-3.27 2.74a.75.75 0 001.27 1.16l3.41-2.85m1.63-6.2l1.67-1.67m-4.45 1.5l-1.67-1.67M3 12h18m-9-9h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+        <button onclick="join('share')" class="bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold transition flex items-center justify-center gap-2">
+            <span>📤</span> Chia sẻ
+        </button>
+        <button onclick="join('view')" class="bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold transition flex items-center justify-center gap-2">
+            <span>👁️</span> Xem
+        </button>
+    </div>
+</div>
+
+<script>
+    const username = localStorage.getItem("username");
+    if (!username) {
+        window.location.href = "login.html";
+    } else {
+        document.getElementById("display-name").textContent = username;
+    }
+
+    function logout() {
+        if(confirm("Bạn muốn đăng xuất?")) {
+            localStorage.removeItem("username");
+            window.location.href = "login.html";
+        }
+    }
+
+    function join(role) {
+        const room = document.getElementById('room').value.trim() || 'PhongHop1';
+        window.location.href = `${role}.html?room=${encodeURIComponent(room)}&user=${encodeURIComponent(username)}`;
+    }
+</script>
+</body>
+</html>

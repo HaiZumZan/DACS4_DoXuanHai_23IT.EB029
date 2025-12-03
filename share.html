@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full bg-gray-900">
+<head>
+    <meta charset="UTF-8">
+    <title>Sender - Chia sẻ + Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Ẩn thanh cuộn cho khung chat */
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="flex flex-col h-full text-white bg-black overflow-hidden">
+
+<header class="bg-gray-800 p-3 flex justify-between items-center shadow-md z-10 shrink-0">
+    <div class="flex items-center gap-4">
+        <h1 class="font-bold text-xl text-blue-400">SENDER</h1>
+        <span class="bg-gray-700 px-3 py-1 rounded text-sm text-gray-300">
+            Phòng: <b id="roomName" class="text-white">...</b>
+        </span>
+    </div>
+    <div class="flex gap-3">
+        <button id="camBtn" onclick="toggleCamera()" class="bg-gray-600 hover:bg-gray-500 text-white px-3 py-2 rounded font-bold hidden transition flex items-center gap-2">
+            <span>📷</span> Bật Cam
+        </button>
+
+        <button id="startBtn" onclick="startSharing()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-bold hidden transition flex items-center gap-2">
+            <span>📡</span> Bắt đầu Live
+        </button>
+        <button onclick="exitRoom()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded font-bold transition">
+            🚪 Thoát
+        </button>
+    </div>
+</header>
+
+<div class="flex flex-1 overflow-hidden">
+
+    <div class="flex-1 relative flex items-center justify-center bg-black">
+        <video id="screen" autoplay playsinline muted class="max-w-full max-h-full object-contain"></video>
+
+        <video id="localCam" autoplay playsinline muted class="absolute bottom-4 left-4 w-48 h-36 bg-gray-900 border border-gray-600 rounded-lg object-cover hidden z-20 shadow-lg"></video>
+
+        <div id="status" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-gray-500 text-lg pointer-events-none">
+            Đang kết nối Server...
+        </div>
+    </div>
+
+    <div class="w-80 bg-gray-800 border-l border-gray-700 flex flex-col shrink-0">
+
+        <div class="h-1/3 border-b border-gray-700 flex flex-col">
+            <div class="p-3 bg-gray-750 font-bold text-gray-300 flex justify-between">
+                <span>Người xem</span>
+                <span id="viewerCount" class="bg-blue-600 px-2 rounded text-xs flex items-center">0</span>
+            </div>
+            <div id="viewerList" class="flex-1 overflow-y-auto p-2 space-y-2">
+            </div>
+        </div>
+
+        <div class="flex-1 flex flex-col min-h-0">
+            <div class="p-3 bg-gray-750 font-bold text-gray-300 border-b border-gray-700">Tin nhắn</div>
+
+            <div id="chatBox" class="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-800 scrollbar-hide flex flex-col-reverse">
+            </div>
+
+            <div class="p-2 bg-gray-700 border-t border-gray-600">
+                <form onsubmit="sendChat(event)" class="flex gap-2">
+                    <div class="p-2 bg-gray-700 border-t border-gray-600 relative">
+                        <div id="emojiPicker" class="hidden absolute bottom-14 left-2 bg-gray-800 border border-gray-600 p-2 rounded-lg shadow-xl grid grid-cols-6 gap-2 z-50 w-64 h-48 overflow-y-auto">
+                        </div>
+
+                        <form onsubmit="sendChat(event)" class="flex flex-nowrap items-center gap-2 w-full">
+                            <button type="button" onclick="toggleEmoji()" class="shrink-0 text-2xl hover:bg-gray-600 rounded px-1 transition pb-1">
+                                😀
+                            </button>
+
+                            <input id="chatInput" type="text" placeholder="Chat..." autocomplete="off"
+                                   class="flex-1 min-w-0 bg-gray-600 text-white px-3 py-2 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm">
+
+                            <button type="submit" class="shrink-0 bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded text-white font-bold text-sm">
+                                ➤
+                            </button>
+                        </form>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- CẤU HÌNH ---
+    const WS_URL = "ws://192.168.101.27:3001"; // Thay IP của bạn
+    const RTC_CONFIG = {iceServers:[{urls:'stun:stun.l.google.com:19302'}]};
+
+    // --- DOM ELEMENTS ---
+    const query = new URLSearchParams(window.location.search);
+    const room = query.get("room") || "demo1";
+    const username = query.get("user") || "Sender";
+
+    document.getElementById('roomName').textContent = room;
+    const statusEl = document.getElementById('status');
+    const startBtn = document.getElementById('startBtn');
+    const camBtn = document.getElementById('camBtn');
+    const viewerListEl = document.getElementById('viewerList');
+    const viewerCountEl = document.getElementById('viewerCount');
+    const chatBox = document.getElementById('chatBox');
+    const localCamVideo = document.getElementById('localCam');
+
+    const ws = new WebSocket(WS_URL);
+
+    let localStream = null;   // Chứa track Screen + Audio + Camera
+    let camStream = null;     // Stream riêng của Camera để dễ quản lý
+    const peers = {};
+    const viewerNames = {};
+
+    // --- WEBSOCKET ---
+    ws.onopen = () => {
+        statusEl.textContent = "Sẵn sàng. Bấm 'Bắt đầu Live'.";
+        startBtn.classList.remove('hidden');
+        camBtn.classList.remove('hidden');
+        ws.send(JSON.stringify({ type: "join", room, id: "sender", username: username }));
+    };
+
+    ws.onclose = () => {
+        statusEl.textContent = "Mất kết nối Server!";
+        statusEl.className = "text-red-500 font-bold absolute top-1/2 left-1/2 transform -translate-x-1/2";
+    };
+
+    ws.onmessage = async (msg) => {
+        const data = JSON.parse(msg.data);
+        const viewerId = data.id;
+
+        // 1. Chat
+        if (data.type === "chat") {
+            addChatMessage(data.username, data.content, data.time, false); // Thêm tham số data.time
+            return;
+        }
+
+        // 2. Viewer Join
+        if (data.type === "join" && viewerId && viewerId !== "sender") {
+            viewerNames[viewerId] = data.username || "Khách";
+            updateViewerList();
+            if (localStream) createPeerConnection(viewerId);
+        }
+
+        // 3. Viewer Left
+        if (data.type === "user_left") {
+            if (peers[viewerId]) { peers[viewerId].close(); delete peers[viewerId]; }
+            delete viewerNames[viewerId];
+            updateViewerList();
+        }
+
+        // 4. WebRTC Signaling
+        if (data.type === "answer" && peers[viewerId]) {
+            try { await peers[viewerId].setRemoteDescription(data.answer); } catch(e){}
+        }
+        if (data.type === 'candidate' && peers[viewerId]) {
+            try { await peers[viewerId].addIceCandidate(data.candidate); } catch(e){}
+        }
+    };
+
+    // --- XỬ LÝ EMOJI ---
+    const emojiPicker = document.getElementById('emojiPicker');
+    const chatInput = document.getElementById('chatInput');
+
+    // Danh sách các icon phổ biến (Bạn có thể thêm tùy thích)
+    const emojiList = [
+        "😀", "😂", "🤣", "😍", "🥰", "😎",
+        "😭", "😡", "😱", "🤔", "🤫", "😴",
+        "👍", "👎", "👌", "✌️", "👏", "🙌",
+        "❤️", "💔", "🔥", "✨", "🎉", "🎈",
+        "👀", "✅", "❌", "👋", "💩", "👻",
+        "🐸", "🐷", "🐱", "🐶", "🚀", "💡"
+    ];
+
+    // Hàm khởi tạo: Đổ icon vào bảng
+    function initEmoji() {
+        emojiPicker.innerHTML = ""; // Xóa cũ
+        emojiList.forEach(icon => {
+            const btn = document.createElement('button');
+            btn.textContent = icon;
+            btn.className = "text-xl p-1 hover:bg-gray-700 rounded cursor-pointer transition";
+            btn.type = "button"; // Quan trọng để không submit form
+            btn.onclick = () => {
+                chatInput.value += icon; // Thêm icon vào ô nhập
+                chatInput.focus();
+                emojiPicker.classList.add('hidden'); // Chọn xong thì ẩn bảng
+            };
+            emojiPicker.appendChild(btn);
+        });
+    }
+
+    // Hàm bật/tắt bảng
+    function toggleEmoji() {
+        const isHidden = emojiPicker.classList.contains('hidden');
+        if (isHidden) {
+            emojiPicker.classList.remove('hidden');
+            initEmoji(); // Tạo lại bảng để đảm bảo mới nhất
+        } else {
+            emojiPicker.classList.add('hidden');
+        }
+    }
+
+    // Tự động ẩn bảng emoji khi bấm ra ngoài (Tùy chọn, cho UX tốt hơn)
+    document.addEventListener('click', (e) => {
+        if (!emojiPicker.contains(e.target) && !e.target.closest('button[onclick="toggleEmoji()"]')) {
+            emojiPicker.classList.add('hidden');
+        }
+    });
+
+    // --- LOGIC CHIA SẺ ---
+    let isCameraOn = false;
+
+    async function toggleCamera() {
+        if (isCameraOn) {
+            // Tắt Camera
+            if (camStream) {
+                camStream.getTracks().forEach(track => track.stop());
+                camStream = null;
+            }
+            localCamVideo.classList.add('hidden');
+            camBtn.classList.remove('bg-red-600');
+            camBtn.innerHTML = "<span>📷</span> Bật Cam";
+            isCameraOn = false;
+            // Lưu ý: Tắt camera khi đang Live sẽ không tự xóa track bên phía người xem trong phiên bản đơn giản này.
+            // Họ sẽ thấy hình camera bị đen hoặc đứng.
+        } else {
+            // Bật Camera
+            try {
+                camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                localCamVideo.srcObject = camStream;
+                localCamVideo.classList.remove('hidden');
+                camBtn.classList.add('bg-red-600');
+                camBtn.innerHTML = "<span>🚫</span> Tắt Cam";
+                isCameraOn = true;
+
+                // Nếu đang Live, thêm track camera vào stream chính
+                if (localStream) {
+                    camStream.getVideoTracks().forEach(track => {
+                        localStream.addTrack(track);
+                        // Cần addTrack vào các peer hiện có (cần logic renegotiation phức tạp ->
+                        // Đơn giản nhất: Yêu cầu người dùng bật Cam TRƯỚC khi bấm Start Live)
+                    });
+                }
+            } catch (e) {
+                alert("Không thể bật Camera: " + e.message);
+            }
+        }
+    }
+
+    async function startSharing() {
+        try {
+            statusEl.textContent = "Đang khởi tạo...";
+
+            // 1. Lấy Màn hình
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({
+                video: { cursor: "always" }, audio: false
+            });
+
+            // 2. Lấy Micro
+            let micStream;
+            try {
+                micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true } });
+            } catch (e) { console.log("Không có mic"); }
+
+            // 3. Gộp Stream (Màn hình + Mic)
+            const tracks = [...screenStream.getVideoTracks()];
+            if (micStream) tracks.push(...micStream.getAudioTracks());
+
+            // 4. Nếu Camera đã bật từ trước, thêm vào luôn
+            if (camStream) {
+                tracks.push(...camStream.getVideoTracks());
+            } else if (confirm("Bạn có muốn bật Camera luôn không?")) {
+                await toggleCamera();
+                if (camStream) tracks.push(...camStream.getVideoTracks());
+            }
+
+            localStream = new MediaStream(tracks);
+            document.getElementById('screen').srcObject = localStream;
+
+            statusEl.classList.add('hidden');
+            startBtn.classList.add('hidden');
+
+            // Xử lý khi user bấm "Stop Sharing" của trình duyệt
+            screenStream.getVideoTracks()[0].onended = () => exitRoom();
+
+            // Kết nối người xem hiện có
+            Object.keys(viewerNames).forEach(vid => createPeerConnection(vid));
+
+        } catch (err) {
+            alert("Lỗi: " + err.message);
+            statusEl.textContent = "Lỗi khởi tạo media";
+        }
+    }
+
+    async function createPeerConnection(viewerId) {
+        const pc = new RTCPeerConnection(RTC_CONFIG);
+        peers[viewerId] = pc;
+
+        // Add tất cả tracks (Screen, Mic, Camera)
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+        pc.onicecandidate = (e) => {
+            if(e.candidate) ws.send(JSON.stringify({ type: 'candidate', candidate: e.candidate, room, target: viewerId }));
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        ws.send(JSON.stringify({ type: 'offer', offer, room, target: viewerId }));
+    }
+
+    // --- CHAT FUNCTION ---
+    // 1. Hàm lấy ngày giờ định dạng: "20:30 22/11"
+    function getNow() {
+        const now = new Date();
+        const time = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+        const date = now.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+        return `${time} ${date}`;
+    }
+   // 2. Hàm gửi tin nhắn (Sửa lại)
+    function sendChat(e) {
+        e.preventDefault();
+        const input = document.getElementById('chatInput');
+        const text = input.value.trim();
+
+        if(!text) return;
+
+        const currentTime = getNow(); // Lấy giờ hiện tại
+
+        // Gửi lên Server (Thêm trường 'time')
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: "chat",
+                room: room,  // Lưu ý: ở file share.html biến là 'room', view.html cũng là 'room' (lấy từ URL)
+                username: typeof username !== 'undefined' ? username : myUsername, // Xử lý biến tên khác nhau giữa 2 file
+                content: text,
+                time: currentTime
+            }));
+
+            // Hiện ngay lên giao diện của mình
+            addChatMessage("Tôi", text, currentTime, true);
+
+            input.value = "";
+            input.focus();
+        } else {
+            alert("Mất kết nối Server!");
+        }
+    }
+
+    // 3. Hàm hiển thị tin nhắn (Sửa lại giao diện)
+    function addChatMessage(sender, text, time, isMe) {
+        // Nếu time bị null (tin nhắn cũ), lấy giờ hiện tại bù vào
+        if (!time) time = getNow();
+
+        const div = document.createElement('div');
+        div.className = `flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-4`;
+
+        // HTML hiển thị: Tên người gửi + Thời gian nhỏ bên cạnh
+        div.innerHTML = `
+            <div class="flex items-baseline gap-2 mb-1">
+                <span class="text-xs font-bold ${isMe ? 'text-blue-300' : 'text-green-400'}">${sender}</span>
+                <span class="text-[10px] text-gray-500">${time}</span>
+            </div>
+            <div class="${isMe ? 'bg-blue-600' : 'bg-gray-700'} text-white px-3 py-2 rounded-lg max-w-[90%] break-words text-sm shadow-sm relative">
+                ${text}
+            </div>
+        `;
+
+        const chatBox = document.getElementById('chatBox');
+        chatBox.prepend(div);
+    }
+
+    function updateViewerList() {
+        viewerListEl.innerHTML = "";
+        const ids = Object.keys(viewerNames);
+        viewerCountEl.textContent = ids.length;
+        ids.forEach(id => {
+            const div = document.createElement('div');
+            div.className = "bg-gray-700 p-2 rounded flex items-center gap-2 text-sm";
+            div.innerHTML = `<div class="w-2 h-2 bg-green-500 rounded-full"></div> <span>${viewerNames[id]}</span>`;
+            viewerListEl.appendChild(div);
+        });
+    }
+
+    function exitRoom() {
+        if(localStream) localStream.getTracks().forEach(t => t.stop());
+        ws.close();
+        window.location.href = "index.html";
+    }
+</script>
+</body>
+</html>

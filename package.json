@@ -1,0 +1,14 @@
+{
+  "name": "webrtc-app",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "app": "electron ."
+  },
+  "dependencies": {
+    "ws": "^8.13.0"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0"
+  }
+}

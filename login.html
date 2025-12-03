@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full bg-gray-900">
+<head>
+    <meta charset="UTF-8">
+    <title>Đăng nhập</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="h-full flex items-center justify-center p-6">
+<div class="bg-gray-800 p-10 rounded-2xl shadow-2xl w-full max-w-md">
+    <h2 class="text-3xl font-bold text-white text-center mb-6">WebRTC P2P</h2>
+
+    <div id="msg" class="text-center text-sm mb-4 h-5"></div>
+
+    <div class="space-y-4">
+        <input type="text" id="user" placeholder="Tên đăng nhập" class="w-full p-3 bg-gray-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <input type="password" id="pass" placeholder="Mật khẩu" class="w-full p-3 bg-gray-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+
+        <button onclick="sendAuth('login')" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded transition">Đăng Nhập</button>
+        <button onclick="sendAuth('register')" class="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 rounded transition">Đăng Ký</button>
+    </div>
+</div>
+
+<script>
+    // THAY IP CỦA BẠN VÀO ĐÂY
+    const ws = new WebSocket("ws://192.168.101.27:3001");
+    const msgEl = document.getElementById('msg');
+
+    ws.onopen = () => { msgEl.textContent = "Đã kết nối Server"; msgEl.className = "text-green-400 text-center mb-4"; };
+
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === "register_success") {
+            msgEl.textContent = "Đăng ký thành công! Hãy đăng nhập.";
+            msgEl.className = "text-green-400 text-center mb-4";
+        } else if (data.type === "register_fail") {
+            msgEl.textContent = "Đăng ký thất bại (Tên đã tồn tại?)";
+            msgEl.className = "text-red-400 text-center mb-4";
+        } else if (data.type === "login_success") {
+            // Lưu tên vào bộ nhớ tạm
+            localStorage.setItem("username", data.username);
+            window.location.href = "index.html"; // Chuyển sang trang chọn phòng
+        } else if (data.type === "login_fail") {
+            msgEl.textContent = "Sai tên hoặc mật khẩu!";
+            msgEl.className = "text-red-400 text-center mb-4";
+        }
+    };
+
+    function sendAuth(type) {
+        const user = document.getElementById('user').value;
+        const pass = document.getElementById('pass').value;
+        if (!user || !pass) {
+            msgEl.textContent = "Vui lòng nhập đủ thông tin";
+            msgEl.className = "text-red-400 text-center mb-4";
+            return;
+        }
+        ws.send(JSON.stringify({ type: type, username: user, password: pass }));
+    }
+</script>
+</body>
+</html>
