@@ -102,9 +102,21 @@
         }
 
         // 2. Sender Info
+        // 2. Sender Info
         if (data.type === "join" && data.id === "sender") {
+            // Cập nhật tên Sender ở UI
             document.getElementById('senderName').textContent = data.username || "Sender";
+
+            // GỬI LẠI JOIN CỦA VIEWER CHO SENDER MỚI
+            // để Sender biết là mình đang ở trong phòng và tạo PeerConnection
+            ws.send(JSON.stringify({
+                type: "join",
+                room: room,        // cùng phòng
+                id: viewerId,      // id của viewer (viewer_xxx)
+                username: myUsername
+            }));
         }
+
 
         // 3. WebRTC Offer
         if (data.type === "offer") {
@@ -154,9 +166,35 @@
             try { await pc.addIceCandidate(data.candidate); } catch(e){}
         }
 
+        // Khi Sender rời phòng
         if (data.type === "user_left" && data.id === "sender") {
-            alert("Người chia sẻ đã thoát phòng!");
-            exitRoom();
+            // Đóng kết nối WebRTC hiện tại và dọn UI
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            videoTrackCount = 0;
+
+            remoteScreen.srcObject = null;
+            remoteCamera.srcObject = null;
+            remoteCamera.classList.add('hidden');
+
+            // Cập nhật lại phần header & status
+            document.getElementById('senderName').textContent = "Đang chờ...";
+            statusEl.textContent = "Người chia sẻ đã thoát. Đang chờ người chia sẻ mới...";
+            statusEl.classList.remove('hidden');
+
+            // Hỏi người xem có muốn tiếp tục hay không
+            const stay = confirm(
+                "Người chia sẻ đã thoát phòng!\n\n" +
+                "Nhấn OK để tiếp tục sử dụng ứng dụng và chờ người khác chia sẻ.\n" +
+                "Nhấn Cancel để thoát phòng."
+            );
+
+            if (!stay) {
+                // Người xem chọn thoát
+                exitRoom();
+            }
         }
     };
 
